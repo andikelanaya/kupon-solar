@@ -1,27 +1,52 @@
-// Ganti dengan Web App URL dari Google Apps Script milikmu jika ada
+/* ==========================================================================
+   KONFIGURASI UTAMA
+   ========================================================================== */
+
+// 1. Masukkan Web App URL dari Google Apps Script Anda di bawah ini
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby-wXl-DXCy_qmg7DX9Uv1_6yElcxtQXtNyy9ufFLgQYZPCPB8-nlUOQfWLfVM_QKA/exec';
 
-// Array lokal untuk menyimpan data transaksi
+// 2. PIN Rahasia untuk Approver (Hanya Anda yang tahu)
+const PIN_APPROVER = '1234';
+
+// Variable Global Penyimpanan Data
 let dataKupon = [];
+let previousPendingCount = 0;
+
+/* ==========================================================================
+   INISIALISASI & REAL-TIME POLLING
+   ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Set default tanggal hari ini
+    // Set default tanggal hari ini pada form Maker
     const today = new Date().toISOString().split('T')[0];
-    if (document.getElementById('mkTanggal')) document.getElementById('mkTanggal').value = today;
-    if (document.getElementById('mkRencana')) document.getElementById('mkRencana').value = today;
+    const mkTanggal = document.getElementById('mkTanggal');
+    const mkRencana = document.getElementById('mkRencana');
     
+    if (mkTanggal) mkTanggal.value = today;
+    if (mkRencana) mkRencana.value = today;
+
+    // Ambil data pertama kali saat web dibuka
     ambilDataGlobal();
+
+    // SINKRONISASI REAL-TIME: Ambil data otomatis dari backend setiap 3 detik
+    setInterval(ambilDataGlobal, 3000);
 });
 
-// 1. Switch Tab Menu
+/* ==========================================================================
+   1. NAVIGASI TAB
+   ========================================================================== */
+
 function switchTab(tabName) {
+    // Sembunyikan semua tab content
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    // Unactive semua tombol tab
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
+    // Aktifkan tab content yang dipilih
     const activeTab = document.getElementById(`tab-${tabName}`);
     if (activeTab) activeTab.classList.add('active');
 
-    // Aktifkan style tombol
+    // Aktifkan tombol tab yang sesuai
     const buttons = document.querySelectorAll('.tab-btn');
     buttons.forEach(btn => {
         if (btn.innerText.toLowerCase().includes(tabName.toLowerCase())) {
@@ -30,14 +55,101 @@ function switchTab(tabName) {
     });
 }
 
-// 2. Simpan Data dari Tab MAKER (Status Awal: Pending Approval)
+/* ==========================================================================
+   2. SISTEM NOTIFIKASI WEB (POP-UP TOAST & EFEK SUARA)
+   ========================================================================== */
+
+function showNotification(title, message) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    // Buat elemen Notifikasi Toast
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `
+        <div>
+            <strong>🔔 ${title}</strong>
+            <p style="font-size:0.85rem; margin-top:0.2rem;">${message}</p>
+        </div>
+        <button onclick="this.parentElement.remove()" style="background:none; border:none; color:white; cursor:pointer; font-weight:bold; font-size:1.1rem;">✕</button>
+    `;
+    container.appendChild(toast);
+
+    // Memutar Suara Beep Notifikasi Sederhana
+    try {
+        let ctx = new (window.AudioContext || window.webkitAudioContext)();
+        let osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 800; // Frekuensi suara (Hz)
+        osc.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2); // Berbunyi selama 0.2 detik
+    } catch (e) {
+        console.log("Audio permission pending");
+    }
+
+    // Otomatis Hilangkan Pop-up Setelah 6 Detik
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 6000);
+}
+
+/* ==========================================================================
+   3. SINKRONISASI DATA DARI BACKEND / LOCALSTORAGE
+   ========================================================================== */
+
+function ambilDataGlobal() {
+    if (SCRIPT_URL !== 'https://script.google.com/macros/s/AKfycby-wXl-DXCy_qmg7DX9Uv1_6yElcxtQXtNyy9ufFLgQYZPCPB8-nlUOQfWLfVM_QKA/exec' && SCRIPT_URL.trim() !== '') {
+        fetch(SCRIPT_URL)
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data)) {
+                    prosesDataBaru(data);
+                }
+            })
+            .catch(err => console.error("Sync Error:", err));
+    } else {
+        // Fallback jika SCRIPT_URL belum dikonfigurasi (menggunakan Local Storage)
+        const localData = JSON.parse(localStorage.getItem('fuel_coupons') || '[]');
+        prosesDataBaru(localData);
+    }
+}
+
+function prosesDataBaru(newData) {
+    // Filter pengajuan yang masih berstatus Pending Approval
+    const pendingItems = newData.filter(item => item.status === 'Pending Approval');
+    const currentPendingCount = pendingItems.length;
+
+    // Deteksi jika ada pengajuan baru yang bertambah dari device lain
+    if (currentPendingCount > previousPendingCount) {
+        const itemTerbaru = pendingItems[pendingItems.length - 1];
+        showNotification(
+            'Pengajuan Kupon Baru!', 
+            `Kupon ${itemTerbaru.kupon || ''} dari ${itemTerbaru.nama || 'Maker'} (${itemTerbaru.pengajuan || 0} Liter) membutuhkan approval.`
+        );
+    }
+
+    previousPendingCount = currentPendingCount;
+    dataKupon = newData;
+    
+    // Perbarui seluruh tampilan UI di layar web
+    renderAll();
+}
+
+/* ==========================================================================
+   4. PENANGANAN FORM MAKER (INPUT PENGAJUAN)
+   ========================================================================== */
+
 function handleSimpanMaker(e) {
     e.preventDefault();
 
     const btn = document.getElementById('btnSubmitMaker');
-    btn.disabled = true;
-    btn.innerText = 'Menyimpan...';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Menyimpan...';
+    }
 
+    // Buat Format No Kupon Otomatis (misal: KPN-0001)
     const autoKupon = 'KPN-' + String(dataKupon.length + 1).padStart(4, '0');
 
     const payload = {
@@ -51,86 +163,78 @@ function handleSimpanMaker(e) {
         aktual: 0,
         hmkm: document.getElementById('mkHmKm').value,
         rencana: document.getElementById('mkRencana').value,
-        ket: document.getElementById('mkKet').value,
-        status: 'Pending Approval' // Menunggu disetujui
+        ket: document.getElementById('mkKet') ? document.getElementById('mkKet').value : '',
+        status: 'Pending Approval'
     };
 
     if (SCRIPT_URL !== 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI' && SCRIPT_URL.trim() !== '') {
+        // Kirim pengajuan baru ke Google Apps Script backend
         fetch(SCRIPT_URL, {
             method: 'POST',
             body: JSON.stringify(payload)
         })
         .then(res => res.json())
         .then(() => {
-            alert(`Pengajuan Berhasil! No Kupon: ${autoKupon}. Menunggu Approval.`);
+            alert(`✅ Pengajuan Berhasil Ditambahkan!\nNo Kupon: ${autoKupon}`);
             document.getElementById('formMaker').reset();
-            ambilDataGlobal();
-            switchTab('approval');
+            ambilDataGlobal(); // Sinkronisasi ulang data
         })
-        .catch(err => {
-            console.error("Error mengirim data:", err);
-            // Fallback simpan lokal jika koneksi gagal
-            dataKupon.push(payload);
-            renderAll();
-            switchTab('approval');
-        })
+        .catch(err => alert("Gagal menyimpan ke database: " + err))
         .finally(() => {
-            btn.disabled = false;
-            btn.innerText = 'Simpan & Kirim Approval';
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = 'Simpan & Kirim Approval';
+            }
         });
     } else {
-        // Mode Simpan Lokal (Tanpa Database)
+        // Simpan ke Local Storage jika backend belum diatur
         dataKupon.push(payload);
-        alert(`Pengajuan Berhasil! No Kupon: ${autoKupon}. Silakan disetujui pada tab Approval.`);
+        localStorage.setItem('fuel_coupons', JSON.stringify(dataKupon));
+        alert(`✅ Pengajuan Berhasil!\nNo Kupon: ${autoKupon}`);
         document.getElementById('formMaker').reset();
         renderAll();
-        btn.disabled = false;
-        btn.innerText = 'Simpan & Kirim Approval';
-        switchTab('approval');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'Simpan & Kirim Approval';
+        }
     }
 }
 
-// 3. Ambil Data Global
-function ambilDataGlobal() {
-    if (SCRIPT_URL === 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI' || SCRIPT_URL.trim() === '') {
-        renderAll();
-        return;
-    }
+/* ==========================================================================
+   5. RENDER UTAMA (DASHBOARD, BADGE, APPROVAL, REKAP)
+   ========================================================================== */
 
-    fetch(SCRIPT_URL)
-        .then(res => res.json())
-        .then(data => {
-            if (Array.isArray(data)) {
-                dataKupon = data;
-            }
-            renderAll();
-        })
-        .catch(err => {
-            console.error("Error mengambil data:", err);
-            renderAll();
-        });
-}
-
-// 4. Render Ulang Seluruh Komponen Tampilan
 function renderAll() {
-    updateDashboardStats();
-    renderApprovalList();
-    renderRekapTable(dataKupon.filter(d => d.status === 'Disetujui' || d.status === 'Finish'));
-}
-
-// 5. Update Statistik Dashboard
-function updateDashboardStats() {
+    // Hitung statistik transaksi
     const total = dataKupon.length;
     const pending = dataKupon.filter(d => d.status === 'Pending Approval').length;
     const approved = dataKupon.filter(d => d.status === 'Disetujui' || d.status === 'Finish').length;
 
+    // Render statistik ke Dashboard
     if (document.getElementById('statTotal')) document.getElementById('statTotal').innerText = total;
-    if (document.getElementById('statApproval')) document.getElementById('statApproval').innerText = pending;
-    if (document.getElementById('statDisetujui')) document.getElementById('statDisetujui').innerText = approved;
-    if (document.getElementById('statSelesai')) document.getElementById('statSelesai').innerText = approved;
+    if (document.getElementById('statPending')) document.getElementById('statPending').innerText = pending;
+    if (document.getElementById('statApproved')) document.getElementById('statApproved').innerText = approved;
+
+    // Update Badge Angka Merah pada Tab Approval
+    const badge = document.getElementById('approvalBadge');
+    if (badge) {
+        if (pending > 0) {
+            badge.innerText = pending;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    // Render daftar item pada Tab Approval & Rekap
+    renderApprovalList();
+    renderRekapTable();
 }
 
-// 6. Render Daftar Kupon yang Membutuhkan APPROVAL
+/* ==========================================================================
+   6. RENDER DAFTAR APPROVAL (KARTU PENGAJUAN)
+   ========================================================================== */
+
 function renderApprovalList() {
     const container = document.getElementById('approvalContainer');
     if (!container) return;
@@ -138,120 +242,97 @@ function renderApprovalList() {
     const listPending = dataKupon.filter(item => item.status === 'Pending Approval');
 
     if (listPending.length === 0) {
-        container.innerHTML = `<p class="empty-text">Tidak ada transaksi yang menunggu approval.</p>`;
+        container.innerHTML = `<p style="color:#64748b; padding:1rem 0;">Tidak ada transaksi yang menunggu approval.</p>`;
         return;
     }
 
-    container.innerHTML = listPending.map((item) => `
-        <div class="card" style="border-left: 4px solid #0284c7; margin-bottom: 1rem; padding: 1.25rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <strong style="font-size: 1.1rem;">${item.kupon}</strong>
-                <span class="badge" style="background-color: #fef08a; color: #854d0e; padding: 0.25rem 0.75rem;">Menunggu Approval</span>
+    container.innerHTML = listPending.map(item => `
+        <div class="card" style="border-left: 5px solid #0284c7; margin-bottom: 1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                <strong style="font-size:1.1rem; color:#0f172a;">${item.kupon}</strong>
+                <span class="badge badge-pending">Menunggu Approval</span>
             </div>
-            <p style="font-size: 0.875rem; margin-bottom: 0.35rem;"><strong>Pengaju:</strong> ${item.nama} (${item.dept})</p>
-            <p style="font-size: 0.875rem; margin-bottom: 0.35rem;"><strong>Unit:</strong> ${item.unit} (${item.nopol})</p>
-            <p style="font-size: 0.875rem; margin-bottom: 1rem;"><strong>Jumlah Pengajuan:</strong> ${item.pengajuan} Liter</p>
-            <div style="display: flex; gap: 0.5rem;">
-                <button class="btn btn-primary" onclick="prosesApproval('${item.kupon}', 'Disetujui')">✓ Setujui (Approve)</button>
-                <button class="btn btn-secondary" style="background-color: #fee2e2; color: #991b1b;" onclick="prosesApproval('${item.kupon}', 'Ditolak')">✕ Tolak</button>
+            <p style="font-size:0.875rem; margin-bottom:0.25rem;"><strong>Pengaju:</strong> ${item.nama} (${item.dept})</p>
+            <p style="font-size:0.875rem; margin-bottom:0.25rem;"><strong>Unit:</strong> ${item.unit} (${item.nopol})</p>
+            <p style="font-size:0.875rem; margin-bottom:0.75rem;"><strong>Jumlah Pengajuan:</strong> ${item.pengajuan} Liter</p>
+            <div style="display:flex; gap:0.5rem;">
+                <button class="btn btn-primary" onclick="prosesApprovalWithPIN('${item.kupon}', 'Disetujui')">✓ Setujui (Approve)</button>
+                <button class="btn btn-danger" onclick="prosesApprovalWithPIN('${item.kupon}', 'Ditolak')">✕ Tolak</button>
             </div>
         </div>
     `).join('');
 }
 
-// 7. Fungsionalitas Eksekusi Approve / Reject
-window.prosesApproval = function(noKupon, statusBaru) {
-    const index = dataKupon.findIndex(d => d.kupon === noKupon);
-    if (index !== -1) {
-        dataKupon[index].status = statusBaru;
-        if (statusBaru === 'Disetujui') {
-            dataKupon[index].aktual = dataKupon[index].pengajuan;
-        }
-        alert(`Kupon ${noKupon} berhasil di-update menjadi: ${statusBaru}`);
-        renderAll(); // Memperbarui tampilan secara langsung
-    } else {
-        alert("Data kupon tidak ditemukan.");
-    }
-};
+/* ==========================================================================
+   7. PROSES APPROVAL DENGAN PROTEKSI PIN
+   ========================================================================== */
 
-// 8. Render Tabel Rekap Transaksi yang Disetujui
-function renderRekapTable(dataList) {
+function prosesApprovalWithPIN(noKupon, statusBaru) {
+    // Minta input PIN dari pengguna
+    const inputPin = prompt(`Masukkan PIN Approver untuk ${statusBaru.toLowerCase()} kupon ${noKupon}:`);
+
+    // Batalkan jika tombol Batal / Cancel diklik
+    if (inputPin === null) return;
+
+    // Validasi PIN
+    if (inputPin !== PIN_APPROVER) {
+        alert("❌ PIN Salah! Anda tidak berhak melakukan approval.");
+        return;
+    }
+
+    if (SCRIPT_URL !== 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI' && SCRIPT_URL.trim() !== '') {
+        // Kirim pembaruan status ke Google Apps Script backend
+        fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'updateStatus',
+                kupon: noKupon,
+                status: statusBaru,
+                aktual: dataKupon.find(d => d.kupon === noKupon)?.pengajuan || 0
+            })
+        })
+        .then(res => res.json())
+        .then(() => {
+            alert(`Status kupon ${noKupon} berhasil diubah menjadi: ${statusBaru}`);
+            ambilDataGlobal(); // Refresh data terbaru
+        })
+        .catch(err => alert("Gagal update status: " + err));
+    } else {
+        // Update di Local Storage jika backend belum ada
+        const idx = dataKupon.findIndex(d => d.kupon === noKupon);
+        if (idx !== -1) {
+            dataKupon[idx].status = statusBaru;
+            dataKupon[idx].aktual = dataKupon[idx].pengajuan;
+            localStorage.setItem('fuel_coupons', JSON.stringify(dataKupon));
+            alert(`Status kupon ${noKupon} berhasil diubah menjadi: ${statusBaru}`);
+            renderAll();
+        }
+    }
+}
+
+/* ==========================================================================
+   8. RENDER TABEL REKAPITULASI
+   ========================================================================== */
+
+function renderRekapTable() {
     const tbody = document.getElementById('tableBody');
     if (!tbody) return;
 
-    if (!dataList || dataList.length === 0) {
-        tbody.innerHTML = `<tr class="empty-row"><td colspan="7">Tidak ada transaksi yang disetujui.</td></tr>`;
-        if (document.getElementById('valPengajuan')) document.getElementById('valPengajuan').innerText = "0.00 L";
-        if (document.getElementById('valAktual')) document.getElementById('valAktual').innerText = "0.00 L";
-        if (document.getElementById('valSelisih')) document.getElementById('valSelisih').innerText = "0.00 L";
+    const listFinished = dataKupon.filter(d => d.status === 'Disetujui' || d.status === 'Finish');
+
+    if (listFinished.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:1rem;">Belum ada data transaksi disetujui.</td></tr>`;
         return;
     }
 
-    let totPengajuan = 0;
-    let totAktual = 0;
-
-    tbody.innerHTML = dataList.map(item => {
-        const pengajuan = parseFloat(item.pengajuan) || 0;
-        const aktual = parseFloat(item.aktual) || 0;
-
-        totPengajuan += pengajuan;
-        totAktual += aktual;
-
-        return `
-            <tr>
-                <td><strong>${item.kupon || '-'}</strong></td>
-                <td>${item.tanggal || '-'}</td>
-                <td>${item.unit || '-'}</td>
-                <td>${pengajuan.toFixed(2)}</td>
-                <td>${aktual.toFixed(2)}</td>
-                <td><span class="badge" style="background-color: #dcfce7; color: #15803d;">${item.status}</span></td>
-                <td><button class="btn btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Selesai</button></td>
-            </tr>
-        `;
-    }).join('');
-
-    if (document.getElementById('valPengajuan')) document.getElementById('valPengajuan').innerText = `${totPengajuan.toFixed(2)} L`;
-    if (document.getElementById('valAktual')) document.getElementById('valAktual').innerText = `${totAktual.toFixed(2)} L`;
-    if (document.getElementById('valSelisih')) document.getElementById('valSelisih').innerText = `${(totAktual - totPengajuan).toFixed(2)} L`;
-}
-
-// 9. Filter Tanggal di Tab Rekap
-function filterRekap() {
-    const start = document.getElementById('filterStart').value;
-    const end = document.getElementById('filterEnd').value;
-
-    const dataSelesai = dataKupon.filter(d => d.status === 'Disetujui' || d.status === 'Finish');
-
-    if (!start || !end) {
-        renderRekapTable(dataSelesai);
-        return;
-    }
-
-    const filtered = dataSelesai.filter(item => {
-        return item.tanggal >= start && item.tanggal <= end;
-    });
-
-    renderRekapTable(filtered);
-}
-
-// 10. Export CSV
-function exportCSV() {
-    const dataSelesai = dataKupon.filter(d => d.status === 'Disetujui' || d.status === 'Finish');
-
-    if (dataSelesai.length === 0) {
-        alert('Tidak ada data transaksi yang disetujui untuk diexport!');
-        return;
-    }
-
-    let csv = "No Kupon,Tanggal,Unit,Pengajuan,Aktual,Status\n";
-    dataSelesai.forEach(r => {
-        csv += `${r.kupon},${r.tanggal},"${r.unit}",${r.pengajuan},${r.aktual},${r.status}\n`;
-    });
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Rekap_Kupon_Solar_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
+    tbody.innerHTML = listFinished.map(item => `
+        <tr>
+            <td><strong>${item.kupon}</strong></td>
+            <td>${item.tanggal}</td>
+            <td>${item.nama}</td>
+            <td>${item.unit}</td>
+            <td>${item.pengajuan} L</td>
+            <td><span class="badge badge-success">${item.status}</span></td>
+        </tr>
+    `).join('');
 }
