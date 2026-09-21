@@ -420,7 +420,7 @@
 
     <script>
         // MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI
-        const SCRIPT_URL = 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI';
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby-wXl-DXCy_qmg7DX9Uv1_6yElcxtQXtNyy9ufFLgQYZPCPB8-nlUOQfWLfVM_QKA/exec';
 
         // PIN Khusus Approver (Hanya Anda yang tahu)
         const PIN_APPROVER = '1234';
@@ -489,7 +489,7 @@
 
         // 3. Ambil Data dari Database / LocalStorage secara Real-Time
         function ambilDataGlobal() {
-            if (SCRIPT_URL !== 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI' && SCRIPT_URL.trim() !== '') {
+            if (SCRIPT_URL !== 'Phttps://script.google.com/macros/s/AKfycby-wXl-DXCy_qmg7DX9Uv1_6yElcxtQXtNyy9ufFLgQYZPCPB8-nlUOQfWLfVM_QKA/exec' && SCRIPT_URL.trim() !== '') {
                 fetch(SCRIPT_URL)
                     .then(res => res.json())
                     .then(data => {
@@ -549,7 +549,7 @@
                 status: 'Pending Approval'
             };
 
-            if (SCRIPT_URL !== 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI' && SCRIPT_URL.trim() !== '') {
+            if (SCRIPT_URL !== 'https://script.google.com/macros/s/AKfycby-wXl-DXCy_qmg7DX9Uv1_6yElcxtQXtNyy9ufFLgQYZPCPB8-nlUOQfWLfVM_QKA/exec' && SCRIPT_URL.trim() !== '') {
                 fetch(SCRIPT_URL, {
                     method: 'POST',
                     body: JSON.stringify(payload)
@@ -643,7 +643,7 @@
                 return;
             }
 
-            if (SCRIPT_URL !== 'PASTE_URL_GOOGLE_APPS_SCRIPT_DI_SINI' && SCRIPT_URL.trim() !== '') {
+            if (SCRIPT_URL !== 'https://script.google.com/macros/s/AKfycby-wXl-DXCy_qmg7DX9Uv1_6yElcxtQXtNyy9ufFLgQYZPCPB8-nlUOQfWLfVM_QKA/exec' && SCRIPT_URL.trim() !== '') {
                 fetch(SCRIPT_URL, {
                     method: 'POST',
                     body: JSON.stringify({
